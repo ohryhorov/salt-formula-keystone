@@ -66,9 +66,6 @@
         'pkgs': ['python-keystoneclient', 'python-openstackclient'],
         'service': 'keystone',
         'roles': ['admin', 'Member'],
-        'os_client_config': {
-            'pkgs': ['python-os-client-config'],
-        },
     },
     'RedHat': {
         'pkgs': ['python-keystoneclient'],
@@ -93,8 +90,5 @@
             'percentage': 50,
             'all_auths_rate': 0.1,
         },
-        'telegraf_openstack_input_plugin_interval': '3m',
-        'telegraf_openstack_output_plugin_expiration_interval': '6m',
-        'output_openstack_port': 9127,
     },
 }, grain='os_family', merge=salt['pillar.get']('keystone:monitoring')) %}

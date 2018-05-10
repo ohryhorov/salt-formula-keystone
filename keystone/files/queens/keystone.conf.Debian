@@ -16,7 +16,7 @@
 # `AdminTokenAuthMiddleware` (the `admin_token_auth` filter) from your paste
 # application pipelines (for example, in `keystone-paste.ini`). (string value)
 #admin_token = <None>
-admin_token={{ server.service_token }}
+#admin_token={{ server.service_token }}
 
 # The base public endpoint URL for Keystone that is advertised to clients
 # (NOTE: this does NOT affect how Keystone listens for connections). Defaults
@@ -160,9 +160,9 @@ verbose = true
 # example, logging_context_format_string). (string value)
 # Note: This option can be changed without restarting.
 # Deprecated group/name - [DEFAULT]/log_config
-#log_config_append=<None>
+#log_config_append = <None>
 {%- if server.logging.log_appender %}
-log_config_append = /etc/keystone/logging.conf
+log_config_append=/etc/keystone/logging.conf
 {%- endif %}
 
 # Defines the format string for %%(asctime)s in log records. Default:
@@ -428,14 +428,15 @@ log_dir = /var/log/keystone
 # A URL representing the messaging driver to use and its full configuration.
 # (string value)
 #transport_url = rabbit://nova:3qVSI7a1m8AdaDQ7BpB0PJu4@192.168.0.4:5673/
+{%- set rabbit_port = server.message_queue.get('port', 5671 if server.message_queue.get('ssl',{}).get('enabled', False)  else 5672) %}
 {%- if server.message_queue.members is defined %}
 transport_url = rabbit://{% for member in server.message_queue.members -%}
-                             {{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ member.host }}:{{ member.get('port', 5672) }}
+                             {{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ member.host }}:{{ member.get('port', rabbit_port) }}
                              {%- if not loop.last -%},{%- endif -%}
                          {%- endfor -%}
                              /{{ server.message_queue.virtual_host }}
 {%- else %}
-transport_url = rabbit://{{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ server.message_queue.host }}:{{ server.message_queue.port }}/{{ server.message_queue.virtual_host }}
+transport_url = rabbit://{{ server.message_queue.user }}:{{ server.message_queue.password }}@{{ server.message_queue.host }}:{{ rabbit_port }}/{{ server.message_queue.virtual_host }}
 {%- endif %}
 
 # DEPRECATED: The messaging driver to use, defaults to rabbit. Other drivers
@@ -444,7 +445,6 @@ transport_url = rabbit://{{ server.message_queue.user }}:{{ server.message_queue
 # Its value may be silently ignored in the future.
 # Reason: Replaced by [DEFAULT]/transport_url
 #rpc_backend = rabbit
-rpc_backend = rabbit
 {%- endif %}
 # The default exchange under which topics are scoped. May be overridden by an
 # exchange name specified in the transport_url option. (string value)
@@ -484,9 +484,15 @@ driver = sql
 # are being invoked to validate attributes in the request environment, it can
 # cause conflicts. (list value)
 #methods = external,password,token,oauth1,mapped
-{% if server.federation is defined %}
-methods = external,password,token,{{ server.federation.protocol }}
-{{ server.federation.protocol }} = keystone.auth.plugins.mapped.Mapped
+{% if server.auth_methods is defined %}
+methods = {{ server.auth_methods |join(',') }}
+{%- endif %}
+
+{%- if server.get('federation', {}).oidc is defined %}
+{{ server.federation.oidc.protocol }} = keystone.auth.plugins.mapped.Mapped
+{%- endif %}
+{%- if server.get('federation', {}).saml2 is defined %}
+{{ server.federation.saml2.protocol }} = keystone.auth.plugins.mapped.Mapped
 {%- endif %}
 
 # Entry point for the password auth plugin module in the
@@ -652,23 +658,42 @@ driver = sql
 # requests "origin" header. Format: "<protocol>://<host>[:<port>]", no trailing
 # slash. Example: https://horizon.example.com (list value)
 #allowed_origin = <None>
+{% if server.cors.allowed_origin is defined %}
+allowed_origin = {{ server.cors.allowed_origin }}
+{% endif %}
 
 # Indicate that the actual request can include user credentials (boolean value)
 #allow_credentials = true
+{% if server.cors.allow_credentials is defined %}
+allow_credentials = {{ server.cors.allow_credentials }}
+{% endif %}
 
 # Indicate which headers are safe to expose to the API. Defaults to HTTP Simple
 # Headers. (list value)
 #expose_headers = X-Auth-Token,X-Openstack-Request-Id,X-Subject-Token
+{% if server.cors.expose_headers is defined %}
+expose_headers = {{ server.cors.expose_headers }}
+{% endif %}
 
 # Maximum cache age of CORS preflight requests. (integer value)
 #max_age = 3600
+{% if server.cors.max_age is defined %}
+max_age = {{ server.cors.max_age }}
+{% endif %}
+
 
 # Indicate which methods can be used during the actual request. (list value)
 #allow_methods = GET,PUT,POST,DELETE,PATCH
+{% if server.cors.allow_methods is defined %}
+allow_methods = {{ server.cors.allow_methods }}
+{% endif %}
 
 # Indicate which header field names may be used during the actual request.
 # (list value)
 #allow_headers = X-Auth-Token,X-Openstack-Request-Id,X-Subject-Token,X-Project-Id,X-Project-Name,X-Project-Domain-Id,X-Project-Domain-Name,X-Domain-Id,X-Domain-Name
+{% if server.cors.allow_headers is defined %}
+allow_headers = {{ server.cors.allow_headers }}
+{% endif %}
 
 
 [cors.subdomain]
@@ -723,7 +748,7 @@ driver = sql
 # of keys should be managed separately and require different rotation policies.
 # Do not share this repository with the repository used to manage keys for
 # Fernet tokens. (string value)
-#key_repository = /etc/keystone/credential-keys/
+key_repository = {{ server.credential.location }}
 
 
 [database]
@@ -754,7 +779,7 @@ driver = sql
 # Deprecated group/name - [DATABASE]/sql_connection
 # Deprecated group/name - [sql]/connection
 #connection = <None>
-connection={{ server.database.engine }}+pymysql://{{ server.database.user }}:{{ server.database.password }}@{{ server.database.host }}/{{ server.database.name }}
+connection={{ server.database.engine }}+pymysql://{{ server.database.user }}:{{ server.database.password }}@{{ server.database.host }}/{{ server.database.name }}{%- if server.database.get('ssl',{}).get('enabled',False) %}?ssl_ca={{ server.database.ssl.get('cacert_file', server.cacert_file) }}{% endif %}
 
 # The SQLAlchemy connection string to use to connect to the slave database.
 # (string value)
@@ -956,6 +981,15 @@ admin_port = 35357
 # Specifies the distribution of the keystone server. (string value)
 #Distribution = Ubuntu
 
+{%- if server.get('federation', {}).saml2 is defined %}
+[{{ server.federation.saml2.protocol }}]
+remote_id_attribute = {{ server.federation.saml2.remote_id_attribute }}
+{%- endif %}
+
+{%- if server.get('federation', {}).oidc is defined %}
+[{{ server.federation.oidc.protocol }}]
+remote_id_attribute = {{ server.federation.oidc.remote_id_attribute }}
+{%- endif %}
 
 [federation]
 
@@ -981,9 +1015,6 @@ driver = {{ server.federation.federation_driver }}
 # `mod_auth_openidc`, this could be `HTTP_OIDC_ISS`. For `mod_auth_mellon`,
 # this could be `MELLON_IDP`. (string value)
 #remote_id_attribute = <None>
-{%- if server.federation is defined %}
-remote_id_attribute = {{ server.federation.remote_id_attribute }}
-{%- endif %}
 
 # An arbitrary domain name that is reserved to allow federated ephemeral users
 # to have a domain concept. Note that an admin will not be able to create a
@@ -1101,7 +1132,7 @@ max_active_keys={{ server.tokens.get('max_active_keys', '3') }}
 # reason to change this value. (string value)
 #default_domain_id = default
 {%- if server.get('domain', {}) %}
-{%- for name, domain in server.domain.iteritems() %}
+{%- for name, domain in server.domain.items() %}
 {%- if domain.get('default', False) %}
 default_domain_id = {{ name }}
 {%- endif %}
@@ -1934,6 +1965,23 @@ driver=messagingv2
 # From oslo.messaging
 #
 
+
+{%- if server.notification %}
+
+{%- if server.message_queue.get('ssl',{}).get('enabled', False) %}
+rabbit_use_ssl=true
+
+{%- if server.message_queue.ssl.version is defined %}
+kombu_ssl_version = {{ server.message_queue.ssl.version }}
+{%- elif salt['grains.get']('pythonversion') > [2,7,8] %}
+kombu_ssl_version = TLSv1_2
+{%- endif %}
+
+kombu_ssl_ca_certs = {{ server.message_queue.ssl.get('cacert_file', server.cacert_file) }}
+{%- endif %}
+
+{%- endif %}
+
 # Use durable queues in AMQP. (boolean value)
 # Deprecated group/name - [DEFAULT]/amqp_durable_queues
 # Deprecated group/name - [DEFAULT]/rabbit_durable_queues
@@ -2367,7 +2415,7 @@ heartbeat_rate = 2
 # The maximum body size for each  request, in bytes. (integer value)
 # Deprecated group/name - [DEFAULT]/osapi_max_request_body_size
 # Deprecated group/name - [DEFAULT]/max_request_body_size
-#max_request_body_size = 114688
+max_request_body_size= {{ server.max_request_body_size }}
 
 # DEPRECATED: The HTTP Header that will be used to determine what the original
 # request protocol scheme was, even if it was hidden by a SSL termination
@@ -2427,8 +2475,11 @@ heartbeat_rate = 2
 # Supplied drivers are `rules` (which does not support any CRUD operations for
 # the v3 policy API) and `sql`. Typically, there is no reason to set this
 # option unless you are providing a custom entry point. (string value)
-#driver = sql
-driver = keystone.policy.backends.sql.Policy
+driver = sql
+#
+# Explicit defintion of the driver is depricated
+#
+#driver = keystone.policy.backends.sql.Policy
 
 # Maximum number of entities that will be returned in a policy collection.
 # (integer value)
@@ -2951,10 +3002,11 @@ expiration = {{ server.tokens.expiration }}
 # setup. `fernet` tokens do not need to be persisted at all, but require that
 # you run `keystone-manage fernet_setup` (also see the `keystone-manage
 # fernet_rotate` command). (string value)
-#provider = fernet
 {% if server.tokens.engine == 'fernet' %}
-provider = keystone.token.providers.fernet.Provider
+provider = fernet
 {% endif %}
+# Depricated since previous version
+#provider = keystone.token.providers.fernet.Provider
 
 # Entry point for the token persistence backend driver in the
 # `keystone.token.persistence` namespace. Keystone provides `kvs` and `sql`
@@ -2963,7 +3015,7 @@ provider = keystone.token.providers.fernet.Provider
 # `[database]` section. If you're using the `fernet` `[token] provider`, this
 # backend will not be utilized to persist tokens at all. (string value)
 #driver = sql
-driver = keystone.token.persistence.backends.memcache_pool.Token
+#driver = keystone.token.persistence.backends.memcache_pool.Token
 
 # Toggle for caching token creation and validation data. This has no effect
 # unless global caching is enabled. (boolean value)
@@ -3010,6 +3062,7 @@ revoke_by_id = False
 # Defaults to two days. (integer value)
 #allow_expired_window = 172800
 
+hash_algorithm = {{ server.hash_algorithm }}
 
 [tokenless_auth]
 
@@ -3070,9 +3123,9 @@ revoke_by_id = False
 Distribution = Ubuntu
 
 {% if server.extra_config is defined %}
-{%- for section, params in server.extra_config.iteritems() %}
+{%- for section, params in server.extra_config.items() %}
 [{{ section }}]
-{%- for param, value in params.iteritems() %}
+{%- for param, value in params.items() %}
 {{ param }} = {{ value }}
 {%- endfor %}
 {%- endfor %}

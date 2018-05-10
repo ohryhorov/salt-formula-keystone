@@ -4,10 +4,6 @@
 keystone_packages:
   pkg.installed:
   - names: {{ server.pkgs }}
-  {%- if server.service_name in ['apache2', 'httpd'] %}
-  - require_in:
-    - pkg: apache_packages
-  {%- endif %}
 
 {%- set ldap = {'enabled': False} %}
 {%- if server.get('backend') == 'ldap' %}
@@ -26,10 +22,6 @@ keystone_ldap_packages:
   - names:
     - python-ldap
     - python-ldappool
-  {%- if server.service_name in ['apache2', 'httpd'] %}
-  - require_in:
-    - pkg: apache_packages
-  {%- endif %}
 {% endif %}
 
 {%- if server.service_name in ['apache2', 'httpd'] %}
@@ -159,7 +151,7 @@ keystone_fluentd_logger_package:
   - watch_in:
     - service: {{ keystone_service }}
 
-{%- for name, rule in server.get('policy', {}).items() %}
+{%- for name, rule in server.get('policy', {}).iteritems() %}
 
 {%- if rule != None %}
 
@@ -196,7 +188,7 @@ rule_{{ name }}_absent:
     - require:
       - pkg: keystone_packages
 
-{%- for domain_name, domain in server.domain.items() %}
+{%- for domain_name, domain in server.domain.iteritems() %}
 
 /etc/keystone/domains/keystone.{{ domain_name }}.conf:
   file.managed:
@@ -224,23 +216,10 @@ keystone_domain_{{ domain_name }}_cacert:
 
 {%- endif %}
 
-{#- can't use RC file here as identity endpoint may not be present in keystone #}
-{#- as we will add it later in keystone.client state. Use endpoint override here. #}
-{#- will be fixed when switched to keystone bootstrap. #}
-{#- TODO: move domain creation to keystone.client state. #}
 keystone_domain_{{ domain_name }}:
   cmd.run:
-    - name: openstack --os-identity-api-version 3
-            --os-endpoint {{ server.bind.get('private_protocol', 'http') }}://{{ server.bind.private_address }}:{{ server.bind.private_port }}/v3
-            --os-token {{ server.service_token }}
-            --os-auth-type admin_token
-            domain create --description "{{ domain.description }}" {{ domain_name }}
-    - unless: {% if grains.get('noservices') %}/bin/true{% else %}
-            openstack --os-identity-api-version 3
-            --os-endpoint {{ server.bind.get('private_protocol', 'http') }}://{{ server.bind.private_address }}:{{ server.bind.private_port }}/v3
-            --os-token {{ server.service_token }}
-            --os-auth-type admin_token
-            domain show "{{ domain_name }}"{% endif %}
+    - name: source /root/keystonercv3 && openstack domain create --description "{{ domain.description }}" {{ domain_name }}
+    - unless: {% if grains.get('noservices') %}/bin/true{% else %}source /root/keystonercv3 && openstack domain list | grep " {{ domain_name }}"{% endif %}
     - shell: /bin/bash
     - require:
       - file: /root/keystonercv3
@@ -354,22 +333,15 @@ keystone_credential_setup:
 {%- endif %}
 {%- endif %}
 
-{%- if server.version not in ['mitaka', 'newton', 'ocata', 'pike'] %}
+
 {%- if not grains.get('noservices', False) %}
 keystone_identity_bootstrap_setup:
   cmd.run:
-  - name: keystone-manage bootstrap
-          --bootstrap-password {{ server.admin_password }}
-          --bootstrap-username {{ server.admin_name }}
-          --bootstrap-project-name admin
-          --bootstrap-role-name admin
-          --bootstrap-service-name keystone
-          --bootstrap-region-id {{ server.get('admin_region', 'RegionOne') }}
-          --bootstrap-internal-url {{ server.bind.get('protocol', 'http') }}://{{ server.bind.address }}:{{ server.bind.get('port', 5000) }}
-  - unless:
-      . /root/keystonercv3; openstack endpoint list --service identity --interface internal -f value -c URL  |grep {{ server.bind.get('port', 5000) }}
+  - name: keystone-manage bootstrap --bootstrap-password {{ server.admin_password }} --bootstrap-username {{ server.admin_name }} --bootstrap-project-name admin --bootstrap-role-name admin --bootstrap-service-name keystone --bootstrap-region-id {{ server.get('admin_region', 'RegionOne') }} --bootstrap-admin-url {{ server.bind.get('private_protocol', 'http') }}://{{ server.bind.private_address }}:{{ server.bind.private_port }} --bootstrap-public-url {{ server.bind.get('public_protocol', 'http') }}://{{ server.bind.public_address }}:{{ server.bind.public_port }} --bootstrap-internal-url {{ server.bind.get('public_protocol', 'http') }}://{{ server.bind.public_address }}:{{ server.bind.public_port }}
+  - require:
+    - service: {{ keystone_service }}
 {%- endif %}
-{%- endif %}
+
 
 {%- if not grains.get('noservices', False) %}
 
@@ -379,7 +351,7 @@ keystone_service_tenant:
   keystoneng.tenant_present:
   - name: {{ server.service_tenant }}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - cmd: keystone_syncdb
 
@@ -387,7 +359,7 @@ keystone_admin_tenant:
   keystoneng.tenant_present:
   - name: {{ server.admin_tenant }}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_service_tenant
 
@@ -395,7 +367,7 @@ keystone_roles:
   keystoneng.role_present:
   - names: {{ server.roles }}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_service_tenant
 
@@ -411,7 +383,7 @@ keystone_admin_user:
       {{ server.admin_tenant }}:
       - admin
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_admin_tenant
     - keystoneng: keystone_roles
@@ -420,7 +392,7 @@ keystone_admin_user:
 
 {%- endif %}
 
-{%- for service_name, service in server.get('service', {}).items() %}
+{%- for service_name, service in server.get('service', {}).iteritems() %}
 
 keystone_{{ service_name }}_service:
   keystoneng.service_present:
@@ -428,7 +400,7 @@ keystone_{{ service_name }}_service:
   - service_type: {{ service.type }}
   - description: {{ service.description }}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_roles
 
@@ -440,7 +412,7 @@ keystone_{{ service_name }}_{{ service.get('region', 'RegionOne') }}_endpoint:
   - adminurl: '{{ service.bind.get('admin_protocol', 'http') }}://{{ service.bind.admin_address }}:{{ service.bind.admin_port }}{{ service.bind.admin_path }}'
   - region: {{ service.get('region', 'RegionOne') }}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_{{ service_name }}_service
 
@@ -456,7 +428,7 @@ keystone_user_{{ service.user.name }}:
       {{ server.service_tenant }}:
       - admin
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_roles
 
@@ -464,17 +436,17 @@ keystone_user_{{ service.user.name }}:
 
 {%- endfor %}
 
-{%- for tenant_name, tenant in server.get('tenant', {}).items() %}
+{%- for tenant_name, tenant in server.get('tenant', {}).iteritems() %}
 
 keystone_tenant_{{ tenant_name }}:
   keystoneng.tenant_present:
   - name: {{ tenant_name }}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_roles
 
-{%- for user_name, user in tenant.get('user', {}).items() %}
+{%- for user_name, user in tenant.get('user', {}).iteritems() %}
 
 keystone_user_{{ user_name }}:
   keystoneng.user_present:
@@ -490,7 +462,7 @@ keystone_user_{{ user_name }}:
       - Member
       {%- endif %}
   - connection_token: {{ server.service_token }}
-  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v2.0'
+  - connection_endpoint: 'http://{{ server.bind.address }}:{{ server.bind.private_port }}/v3'
   - require:
     - keystoneng: keystone_tenant_{{ tenant_name }}
 

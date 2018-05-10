@@ -67,8 +67,6 @@ Management of Keystone users
 
 '''
 
-# Import 3rd-party libs
-from salt.ext import six
 
 def __virtual__():
     '''
@@ -105,6 +103,7 @@ def user_present(name,
                  profile=None,
                  password_reset=True,
                  project=None,
+                 domain=None,
                  **connection_args):
     '''
     Ensure that the keystone user is present with the specified properties.
@@ -137,6 +136,9 @@ def user_present(name,
 
     enabled
         Availability state for this user
+
+    domain
+        The domain of the user
 
     roles
         The roles the user should have under given tenants.
@@ -284,6 +286,7 @@ def user_present(name,
                                          tenant_id=tenant_id,
                                          enabled=enabled,
                                          profile=profile,
+                                         domain=domain,
                                          **connection_args)
         if roles:
             for tenant in roles:
@@ -394,17 +397,9 @@ def tenant_present(name, description=None, enabled=True, profile=None,
         else:
             created = __salt__['keystoneng.tenant_create'](name=name, description=description, enabled=enabled,
                                                          profile=profile, **connection_args)
-        # If tenant has been created succesfully 'created' is:
-        #      {u'test_tenant3': {'enabled': True, 'NAME_ATTR': 'name', 'HUMAN_ID': False, 'name': u'test_tenant3', 'id': u'0a5f319f8a794bfc9045746069c76fd8'}}
-        # If tenant is not created:
-        #      {'Error': 'Unable to resolve tenant id'}
-        if 'Error' in created and isinstance(created['Error'], six.string_types):
-            ret['result'] = False
-            ret['comment'] = 'Cannot create tenant / project "{0}"'.format(name)
-        else:
-            ret['changes']['Tenant'] = 'Created'
-            ret['result'] = True
-            ret['comment'] = 'Tenant / project "{0}" has been added'.format(name)
+        ret['changes']['Tenant'] = 'Created' if created is True else 'Failed'
+        ret['result'] = created
+        ret['comment'] = 'Tenant / project "{0}" has been added'.format(name)
     return ret
 
 
@@ -502,6 +497,8 @@ def role_present(name, profile=None, **connection_args):
            'result': True,
            'comment': 'Role "{0}" already exists'.format(name)}
 
+    _api_version(profile=profile, **connection_args)
+
     # Check if role is already present
     role = __salt__['keystoneng.role_get'](name=name, profile=profile,
                                          **connection_args)
@@ -568,6 +565,8 @@ def service_present(name, service_type, description=None,
            'changes': {},
            'result': True,
            'comment': 'Service "{0}" already exists'.format(name)}
+
+    _api_version(profile=profile, **connection_args)
 
     # Check if service is already present
     role = __salt__['keystoneng.service_get'](name=name,
@@ -661,6 +660,9 @@ def endpoint_present(name,
            'changes': {},
            'result': True,
            'comment': ''}
+
+    _api_version(profile=profile, **connection_args)
+
     endpoint = __salt__['keystoneng.endpoint_get'](name, region,
                                                  profile=profile,
                                                  interface=interface,

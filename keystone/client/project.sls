@@ -1,7 +1,5 @@
 {%- from "keystone/map.jinja" import client with context %}
-{# this legacy client is deprecated and will be removed when pike is EOL #}
-{# it is not recommended to use it for v3 API #}
-{%- if client.enabled and not client.get('resources', {}).get('v3', {}).get('enabled', False) %}
+{%- if client.enabled %}
 
 {%- if client.tenant is defined %}
 
@@ -11,9 +9,9 @@ keystone_client_roles:
   - connection_user: {{ client.server.user }}
   - connection_password: {{ client.server.password }}
   - connection_tenant: {{ client.server.tenant }}
-  - connection_auth_url: 'http://{{ client.server.host }}:{{ client.server.public_port }}/v2.0/'
+  - connection_auth_url: 'http://{{ client.server.host }}:{{ client.server.public_port }}'
 
-{%- for tenant_name, tenant in client.get('tenant', {}).items() %}
+{%- for tenant_name, tenant in client.get('tenant', {}).iteritems() %}
 
 keystone_tenant_{{ tenant_name }}:
   keystoneng.tenant_present:
@@ -21,11 +19,11 @@ keystone_tenant_{{ tenant_name }}:
   - connection_user: {{ client.server.user }}
   - connection_password: {{ client.server.password }}
   - connection_tenant: {{ client.server.tenant }}
-  - connection_auth_url: 'http://{{ client.server.host }}:{{ client.server.public_port }}/v2.0/'
+  - connection_auth_url: 'http://{{ client.server.host }}:{{ client.server.public_port }}'
   - require:
     - keystoneng: keystone_client_roles
 
-{%- for user_name, user in tenant.get('user', {}).items() %}
+{%- for user_name, user in tenant.get('user', {}).iteritems() %}
 
 keystone_{{ tenant_name }}_user_{{ user_name }}:
   keystoneng.user_present:
@@ -45,7 +43,7 @@ keystone_{{ tenant_name }}_user_{{ user_name }}:
   - connection_user: {{ client.server.user }}
   - connection_password: {{ client.server.password }}
   - connection_tenant: {{ client.server.tenant }}
-  - connection_auth_url: 'http://{{ client.server.host }}:{{ client.server.public_port }}/v2.0/'
+  - connection_auth_url: 'http://{{ client.server.host }}:{{ client.server.public_port }}'
   - require:
     - keystoneng: keystone_tenant_{{ tenant_name }}
 

@@ -26,7 +26,7 @@ minion:
     {%- endif %}
 
     {#- Profile based metadata #}
-    {%- for profile_name, identity in client.get('server', {}).items() %}
+    {%- for profile_name, identity in client.get('server', {}).iteritems() %}
       {%- set protocol = identity.admin.get('protocol', 'http') %}
 
       {%- if identity.admin.get('api_version', '2') == '3' %}
@@ -49,16 +49,12 @@ minion:
       keystone.auth_url: '{{ protocol+'://'+identity.admin.host+':'+identity.admin.port|string+version }}'
       keystone.region_name: '{{ identity.admin.region_name }}'
       keystone.use_keystoneauth: {{ identity.admin.get('use_keystoneauth', false) }}
+      keystone.project_domain_name: '{{ identity.admin.get('project_domain_name', 'default') }}'
+      keystone.user_domain_name: '{{ identity.admin.get('user_domain_name', 'default') }}'
 
         {%- endif %}
       {%- endif %}
     {%- endfor %}
-  {%- endif %}
-dependency:
-  {% from "keystone/map.jinja" import server,client with context %}
-  {%- if client.get('enabled', False) or server.get('enabled', False) %}
-  engine: pkg
-  pkgs: {{ client.pkgs }}
   {%- endif %}
 
 {#-

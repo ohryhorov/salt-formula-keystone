@@ -1023,7 +1023,7 @@ def user_get(user_id=None, name=None, profile=None, **connection_args):
 
 
 def user_create(name, password, email, tenant_id=None,
-                enabled=True, profile=None, project_id=None, description=None, **connection_args):
+                enabled=True, profile=None, project_id=None, description=None, domain=None, **connection_args):
     '''
     Create a user (keystone user-create)
 
@@ -1042,9 +1042,10 @@ def user_create(name, password, email, tenant_id=None,
         item = kstone.users.create(name=name,
                                    password=password,
                                    email=email,
-                                   project_id=project_id,
+                                   default_project=project_id,
                                    enabled=enabled,
-                                   description=description)
+                                   description=description,
+                                   domain=domain)
     else:
         item = kstone.users.create(name=name,
                                    password=password,
@@ -1158,32 +1159,12 @@ def user_verify_password(user_id=None, name=None, password=None,
         salt '*' keystone.user_verify_password name=test password=foobar
         salt '*' keystone.user_verify_password user_id=c965f79c4f864eaaa9c3b41904e67082 password=foobar
     '''
-    kstone = auth(profile, **connection_args)
-    if 'connection_endpoint' in connection_args:
-        auth_url = connection_args.get('connection_endpoint')
-    else:
-        if _client_version(kstone) > 2:
-            auth_url = __salt__['config.option']('keystone.endpoint',
-                                                 'http://127.0.0.1:35357/v3')
-        else:
-            auth_url = __salt__['config.option']('keystone.endpoint',
-                                                 'http://127.0.0.1:35357/v2.0')
-
-    if user_id:
-        for user in kstone.users.list():
-            if user.id == user_id:
-                name = user.name
-                break
-    if not name:
-        return {'Error': 'Unable to resolve user name'}
-    kwargs = {'username': name,
-              'password': password,
-              'auth_url': auth_url}
+    validation_connection_args=connection_args.copy()
+    validation_connection_args['connection_user_id'] = user_id
+    validation_connection_args['connection_user'] = name
+    validation_connection_args['connection_password'] = password
     try:
-        if _client_version(kstone) > 2:
-            client3.Client(**kwargs)
-        else:
-            client.Client(**kwargs)
+        auth(profile, **validation_connection_args)
     except (keystoneclient.exceptions.Unauthorized,
             keystoneclient.exceptions.AuthorizationFailure):
         return False
